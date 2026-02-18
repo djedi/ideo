@@ -1,0 +1,14 @@
+[package]
+name = "ideo"
+version = "0.1.0"
+edition = "2024"
+description = "CLI tool for generating images with the Ideogram v3 API"
+license = "MIT"
+repository = "https://github.com/djedi/ideo"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4"

@@ -1,0 +1,11 @@
+.env
+*.png
+*.jpg
+*.jpeg
+*.webp
+.vscode/
+
+
+# Added by cargo
+
+/target
