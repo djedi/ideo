@@ -63,6 +63,7 @@ ideo [options] <prompt>
 | `--negative TEXT` | Negative prompt | — |
 | `--seed NUM` | Seed for reproducibility | — |
 | `--magic-prompt MODE` | Prompt enhancement | — |
+| `--character-ref FILE` | Character reference image | — |
 | `-h, --help` | Show help | — |
 
 ### Aspect ratios
@@ -89,6 +90,12 @@ Controls whether Ideogram automatically enhances your prompt:
 - `AUTO` — let the API decide
 - `ON` — always enhance
 - `OFF` — use your prompt exactly as written
+
+### Character reference
+
+Use `--character-ref` to provide a reference image for consistent character generation. The image must be JPEG, PNG, or WebP and no larger than 10MB. The API currently supports one character reference image per request.
+
+Note: generations with character references are subject to [character reference pricing](https://developer.ideogram.ai).
 
 ## Examples
 
@@ -120,6 +127,12 @@ Exclude elements with a negative prompt:
 
 ```bash
 ideo --negative "text, watermark, blurry" "Product photo of a ceramic mug"
+```
+
+Generate with a character reference image:
+
+```bash
+ideo --character-ref hero.png "The character riding a horse through a desert"
 ```
 
 ## Scripting
