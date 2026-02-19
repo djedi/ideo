@@ -1,6 +1,6 @@
 [package]
 name = "ideo"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "CLI tool for generating images with the Ideogram v3 API"
 license = "MIT"
