@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect version bump
+        id: version
+        run: |
+          current=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          previous=$(git show HEAD~1:Cargo.toml | grep '^version' | head -1 | sed 's/.*"\(.*\)"/\1/')
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          if [ "$current" != "$previous" ]; then
+            echo "bumped=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub release
+        if: steps.version.outputs.bumped == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${{ steps.version.outputs.current }}"
+          gh release create "v${version}" --title "v${version}" --generate-notes
+
+      - name: Update Homebrew tap
+        if: steps.version.outputs.bumped == 'true'
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          version="${{ steps.version.outputs.current }}"
+          tarball_url="https://github.com/djedi/ideo/archive/refs/tags/v${version}.tar.gz"
+          sha256=$(curl -sL "$tarball_url" | shasum -a 256 | awk '{print $1}')
+
+          # Clone the tap repo
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/djedi/homebrew-tap.git" tap
+          cd tap
+
+          # Update the formula
+          sed -i "s|url \".*\"|url \"${tarball_url}\"|" Formula/ideo.rb
+          sed -i "s|sha256 \".*\"|sha256 \"${sha256}\"|" Formula/ideo.rb
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/ideo.rb
+          git commit -m "Update ideo to v${version}"
+          git push
