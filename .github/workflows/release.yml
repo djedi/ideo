@@ -5,8 +5,11 @@ on:
     branches: [master]
 
 jobs:
-  release:
+  detect-version:
     runs-on: ubuntu-latest
+    outputs:
+      bumped: ${{ steps.version.outputs.bumped }}
+      current: ${{ steps.version.outputs.current }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,20 +26,122 @@ jobs:
             echo "bumped=true" >> "$GITHUB_OUTPUT"
           fi
 
+  create-release:
+    needs: detect-version
+    if: needs.detect-version.outputs.bumped == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Create GitHub release
-        if: steps.version.outputs.bumped == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          version="${{ steps.version.outputs.current }}"
+          version="${{ needs.detect-version.outputs.current }}"
           gh release create "v${version}" --title "v${version}" --generate-notes
 
+  build-binaries:
+    needs: [detect-version, create-release]
+    if: needs.detect-version.outputs.bumped == 'true'
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          rustup target add ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+
+      - name: Install OpenSSL (Linux)
+        if: runner.os == 'Linux' && matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev
+
+      - name: Install OpenSSL for cross-compile (Linux aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo dpkg --add-architecture arm64
+          # Use ports for arm64 packages
+          sudo tee /etc/apt/sources.list.d/arm64.list << 'SOURCES'
+          deb [arch=arm64] http://ports.ubuntu.com/ noble main restricted universe
+          deb [arch=arm64] http://ports.ubuntu.com/ noble-updates main restricted universe
+          SOURCES
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev:arm64
+          echo "PKG_CONFIG_SYSROOT_DIR=/usr/aarch64-linux-gnu" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package (Unix)
+        if: matrix.archive == 'tar.gz'
+        run: |
+          version="${{ needs.detect-version.outputs.current }}"
+          name="ideo-v${version}-${{ matrix.target }}"
+          mkdir "$name"
+          cp "target/${{ matrix.target }}/release/ideo" "$name/"
+          cp README.md LICENSE* "$name/" 2>/dev/null || true
+          tar czf "${name}.tar.gz" "$name"
+          echo "ASSET=${name}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Package (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $version = "${{ needs.detect-version.outputs.current }}"
+          $name = "ideo-v${version}-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $name
+          Copy-Item "target/${{ matrix.target }}/release/ideo.exe" "$name/"
+          Copy-Item "README.md" "$name/" -ErrorAction SilentlyContinue
+          Compress-Archive -Path "$name/*" -DestinationPath "${name}.zip"
+          echo "ASSET=${name}.zip" | Out-File -Append -FilePath $env:GITHUB_ENV
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${{ needs.detect-version.outputs.current }}"
+          gh release upload "v${version}" "${{ env.ASSET }}" --clobber
+        shell: bash
+
+  update-homebrew:
+    needs: [detect-version, create-release]
+    if: needs.detect-version.outputs.bumped == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Update Homebrew tap
-        if: steps.version.outputs.bumped == 'true'
         env:
           TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
         run: |
-          version="${{ steps.version.outputs.current }}"
+          version="${{ needs.detect-version.outputs.current }}"
           tarball_url="https://github.com/djedi/ideo/archive/refs/tags/v${version}.tar.gz"
           sha256=$(curl -sL "$tarball_url" | shasum -a 256 | awk '{print $1}')
 
